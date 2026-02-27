@@ -1,0 +1,15 @@
+name = "mission-state"
+main = "src/index.js"
+compatibility_date = "2026-02-27"
+
+[[durable_objects.bindings]]
+name = "MISSION_STATE"
+class_name = "MissionState"
+
+[[durable_objects.bindings]]
+name = "FLEET_STATE"
+class_name = "FleetState"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["MissionState", "FleetState"]
