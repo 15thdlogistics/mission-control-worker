@@ -12,7 +12,7 @@ class_name = "FleetState"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["MissionState", "FleetState"]
+new_sqlite_classes = ["MissionState", "FleetState"]
 
 [[services]]
 binding = "mission-control-api"
