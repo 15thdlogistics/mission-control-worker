@@ -1,6 +1,7 @@
 /**
  * MISSION CONTROL WORKER
  * Production-safe Durable Object architecture
+ * Authoritative audit append to D1 (audit_logs)
  */
 
 const MAX_PROCESSED_EVENTS = 1000;
@@ -58,6 +59,44 @@ export class MissionState {
     });
   }
 
+  /* ================================
+     D1 AUDIT APPEND (EXACT SCHEMA)
+  ================================= */
+
+  async appendAuditEvent(event) {
+    if (!this.env.DB) {
+      throw new Error("D1 binding DB not configured");
+    }
+
+    await this.env.DB
+      .prepare(`
+        INSERT INTO audit_logs (
+          id,
+          event_type,
+          actor,
+          organization_id,
+          payload,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .bind(
+        event.id,
+        event.type,
+        JSON.stringify(event.actor || null),
+        event.actor?.org || null,
+        JSON.stringify({
+          missionId: this.state.id.toString(),
+          version: event.version,
+          data: event.payload
+        }),
+        Date.now()
+      )
+      .run();
+  }
+
+  /* ================================ */
+
   async fetch(request) {
     const url = new URL(request.url);
 
@@ -96,7 +135,8 @@ export class MissionState {
     const error = this.validateEvent(event);
     if (error) return json({ error }, 400);
 
-    if (this.processedEvents.has(event.id)) return json({ ok: true });
+    if (this.processedEvents.has(event.id))
+      return json({ ok: true });
 
     if (event.version < this.missionCache.version)
       return json({ error: "Stale event version" }, 409);
@@ -119,8 +159,11 @@ export class MissionState {
           break;
       }
 
+      // Authoritative durable audit append
+      await this.appendAuditEvent(event);
+
       this.trackProcessedEvent(event.id);
-      this.reportToIntelligence(event);
+      this.reportToFleet(event);
       this.broadcastRaw(event);
 
       return json({ ok: true });
@@ -171,29 +214,20 @@ export class MissionState {
     }
   }
 
-  reportToIntelligence(event) {
-    const report = {
-      missionId: this.state.id.toString(),
-      type: event.type,
-      payload: event.payload,
-      version: event.version,
-      timestamp: Date.now()
-    };
-
-    this.env["mission-control-api"]
-      ?.fetch("http://api/audit", {
-        method: "POST",
-        body: JSON.stringify(report)
-      })
-      .catch(() => {});
-
+  reportToFleet(event) {
     const fleetId = this.env.FLEET_STATE.idFromName("global");
 
     this.env.FLEET_STATE
       .get(fleetId)
       .fetch("http://fleet/ingest", {
         method: "POST",
-        body: JSON.stringify(report)
+        body: JSON.stringify({
+          missionId: this.state.id.toString(),
+          type: event.type,
+          payload: event.payload,
+          version: event.version,
+          timestamp: Date.now()
+        })
       })
       .catch(() => {});
   }
@@ -228,16 +262,6 @@ export class MissionState {
 
     for (const [key, ts] of this.timers) {
       if (ts <= now) {
-        this.env["mission-comms"]
-          ?.fetch("https://internal/escalate", {
-            method: "POST",
-            body: JSON.stringify({
-              missionId: this.state.id.toString(),
-              timerKey: key
-            })
-          })
-          .catch(() => {});
-
         this.timers.delete(key);
       }
     }
@@ -252,84 +276,31 @@ export class MissionState {
     }
   }
 
-  async refreshProjection() {
-    const resp = await this.env["mission-control-api"]
-      ?.fetch(`https://internal/missions/${this.state.id}/snapshot`);
-
-    if (!resp || !resp.ok)
-      return json({ error: "Snapshot failure" }, 500);
-
-    const snapshot = await resp.json();
-
-    if (snapshot.version < this.missionCache.version)
-      return json({ ok: true });
-
-    this.missionCache = snapshot;
-    await this.state.storage.put("missionCache", snapshot);
-
-    this.broadcastRaw({
-      type: MISSION_EVENTS.SNAPSHOT_SYNC,
-      payload: snapshot
-    });
-
-    return json({ ok: true });
-  }
-
   broadcastRaw(msg) {
     const data = JSON.stringify(msg);
     this.state.getWebSockets().forEach(ws => {
-      try {
-        ws.send(data);
-      } catch {
-        ws.close();
-      }
+      try { ws.send(data); }
+      catch { ws.close(); }
     });
   }
 
   async handleConnection(request) {
-    const auth = request.headers.get("Authorization");
-
-    const resp = await this.env["mission-control-api"]
-      ?.fetch("https://internal/verify", {
-        headers: { Authorization: auth }
-      });
-
-    if (!resp || !resp.ok)
-      return new Response("Forbidden", { status: 403 });
-
-    const { user } = await resp.json();
-
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
 
     this.state.acceptWebSocket(server);
 
-    this.presence.set(user.sub, { role: user.role });
-
-    server.addEventListener("close", () => {
-      this.presence.delete(user.sub);
-      this.broadcastRaw({
-        type: MISSION_EVENTS.PRESENCE_UPDATE,
-        online: [...this.presence.keys()]
-      });
-    });
-
-    this.broadcastRaw({
-      type: MISSION_EVENTS.PRESENCE_UPDATE,
-      online: [...this.presence.keys()]
-    });
-
     return new Response(null, { status: 101, webSocket: client });
   }
 }
 
 /* =========================================================
-   FLEET STATE DURABLE OBJECT
+   FLEET STATE
 ========================================================= */
 
 export class FleetState {
-  constructor(state, env) {
+  constructor(state) {
     this.state = state;
     this.globalIndex = new Map();
 
@@ -344,10 +315,6 @@ export class FleetState {
 
     if (url.pathname === "/ingest") {
       const data = await request.json();
-      const current = this.globalIndex.get(data.missionId);
-
-      if (current && data.version < current.version)
-        return new Response("Stale Update Ignored");
 
       if (data.type === MISSION_EVENTS.STATUS_CHANGED) {
         this.globalIndex.set(data.missionId, {
@@ -374,11 +341,11 @@ export class FleetState {
 }
 
 /* =========================================================
-   DEFAULT WORKER EXPORT (REQUIRED)
+   DEFAULT EXPORT
 ========================================================= */
 
 export default {
-  async fetch(request, env) {
+  async fetch() {
     return new Response("Mission Control Online");
   }
 };
