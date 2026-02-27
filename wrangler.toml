@@ -1,4 +1,4 @@
-name = "mission-state"
+name = "mission-control-worker"
 main = "src/index.js"
 compatibility_date = "2026-02-27"
 
@@ -13,3 +13,11 @@ class_name = "FleetState"
 [[migrations]]
 tag = "v1"
 new_classes = ["MissionState", "FleetState"]
+
+[[services]]
+binding = "mission-control-api"
+service = "mission-control-api"
+
+[[services]]
+binding = "mission-comms"
+service = "mission-comms"
