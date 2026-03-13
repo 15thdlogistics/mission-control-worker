@@ -64,11 +64,11 @@ export class MissionState {
   ================================= */
 
   async appendAuditEvent(event) {
-    if (!this.env.DB) {
-      throw new Error("D1 binding DB not configured");
+    if (!this.env.schema) {
+      throw new Error("D1 binding schema not configured");
     }
 
-    await this.env.DB
+    await this.env.schema
       .prepare(`
         INSERT INTO audit_logs (
           id,
@@ -93,6 +93,7 @@ export class MissionState {
         Date.now()
       )
       .run();
+  }
   }
 
   /* ================================ */
