@@ -64,6 +64,7 @@ export class MissionState {
   ================================= */
 
   async appendAuditEvent(event) {
+
     if (!this.env.schema) {
       throw new Error("D1 binding schema not configured");
     }
@@ -94,9 +95,10 @@ export class MissionState {
       )
       .run();
   }
-  }
 
-  /* ================================ */
+  /* ======================================================
+     FETCH ROUTER (ONLY CHANGE: /mission/* WILDCARD)
+  ======================================================= */
 
   async fetch(request) {
     const url = new URL(request.url);
@@ -105,8 +107,9 @@ export class MissionState {
       return this.handleConnection(request);
     }
 
-    if (url.pathname === "/ingest/event" && request.method === "POST") {
-      return this.handleEvent(await request.json());
+    // UNIVERSAL MISSION INTAKE
+    if (url.pathname.startsWith("/mission/")) {
+      return this.handleMission(request, url);
     }
 
     if (url.pathname === "/system/refresh" && request.method === "POST") {
@@ -115,6 +118,39 @@ export class MissionState {
 
     return new Response("Not found", { status: 404 });
   }
+
+  /* ======================================================
+     MISSION WILDCARD HANDLER
+  ======================================================= */
+
+  async handleMission(request, url) {
+
+    const action = url.pathname.slice("/mission/".length);
+
+    switch (action) {
+
+      case "event":
+        return this.handleEvent(await request.json());
+
+      case "state":
+        return json(this.missionCache);
+
+      case "presence":
+        return this.handlePresence(await request.json());
+
+      case "command":
+        return this.handleCommand(await request.json());
+
+      default:
+        return new Response(
+          JSON.stringify({ error: "unknown mission action", action }),
+          { status: 404 }
+        );
+    }
+
+  }
+
+  /* ====================================================== */
 
   validateEvent(event) {
     if (!event?.id || !event?.type || typeof event?.version !== "number")
@@ -133,6 +169,7 @@ export class MissionState {
   }
 
   async handleEvent(event) {
+
     const error = this.validateEvent(event);
     if (error) return json({ error }, 400);
 
@@ -143,7 +180,9 @@ export class MissionState {
       return json({ error: "Stale event version" }, 409);
 
     try {
+
       switch (event.type) {
+
         case MISSION_EVENTS.STATUS_CHANGED:
           await this.applyStatusChange(event);
           break;
@@ -158,9 +197,9 @@ export class MissionState {
         case MISSION_EVENTS.SLA_CANCELLED:
           await this.cancelTimer(event.payload.timerKey);
           break;
+
       }
 
-      // Authoritative durable audit append
       await this.appendAuditEvent(event);
 
       this.trackProcessedEvent(event.id);
@@ -168,12 +207,17 @@ export class MissionState {
       this.broadcastRaw(event);
 
       return json({ ok: true });
+
     } catch (e) {
+
       return json({ error: e.message }, 403);
+
     }
+
   }
 
   async applyStatusChange(event) {
+
     const next = event.payload.nextState;
     const current = this.missionCache.status;
 
@@ -188,34 +232,45 @@ export class MissionState {
     };
 
     this.missionCache = updated;
+
     await this.state.storage.put("missionCache", updated);
 
     if (TERMINAL_STATES.includes(next)) {
       this.timers.clear();
       await this.state.storage.delete("timers");
     }
+
   }
 
   trackProcessedEvent(eventId) {
+
     this.processedEvents.set(eventId, Date.now());
     this.eventCounter++;
 
     if (this.processedEvents.size > MAX_PROCESSED_EVENTS) {
+
       const oldest = [...this.processedEvents.entries()]
         .sort((a, b) => a[1] - b[1])[0][0];
+
       this.processedEvents.delete(oldest);
+
     }
 
     if (this.eventCounter >= BATCH_THRESHOLD) {
+
       this.eventCounter = 0;
+
       this.state.storage.put(
         "processedEvents",
         Array.from(this.processedEvents.entries())
       );
+
     }
+
   }
 
   reportToFleet(event) {
+
     const fleetId = this.env.FLEET_STATE.idFromName("global");
 
     this.env.FLEET_STATE
@@ -231,9 +286,11 @@ export class MissionState {
         })
       })
       .catch(() => {});
+
   }
 
   async scheduleTimer(key, executeAt) {
+
     this.timers.set(key, executeAt);
 
     await this.state.storage.put(
@@ -242,29 +299,38 @@ export class MissionState {
     );
 
     await this.state.storage.setAlarm(Math.min(...this.timers.values()));
+
   }
 
   async cancelTimer(key) {
+
     this.timers.delete(key);
+
     await this.state.storage.put(
       "timers",
       Array.from(this.timers.entries())
     );
+
   }
 
   async alarm() {
+
     if (TERMINAL_STATES.includes(this.missionCache.status)) {
+
       this.timers.clear();
       await this.state.storage.delete("timers");
       return;
+
     }
 
     const now = Date.now();
 
     for (const [key, ts] of this.timers) {
+
       if (ts <= now) {
         this.timers.delete(key);
       }
+
     }
 
     await this.state.storage.put(
@@ -275,17 +341,24 @@ export class MissionState {
     if (this.timers.size > 0) {
       await this.state.storage.setAlarm(Math.min(...this.timers.values()));
     }
+
   }
 
   broadcastRaw(msg) {
+
     const data = JSON.stringify(msg);
+
     this.state.getWebSockets().forEach(ws => {
+
       try { ws.send(data); }
       catch { ws.close(); }
+
     });
+
   }
 
   async handleConnection(request) {
+
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
@@ -293,7 +366,9 @@ export class MissionState {
     this.state.acceptWebSocket(server);
 
     return new Response(null, { status: 101, webSocket: client });
+
   }
+
 }
 
 /* =========================================================
@@ -301,23 +376,32 @@ export class MissionState {
 ========================================================= */
 
 export class FleetState {
+
   constructor(state) {
+
     this.state = state;
     this.globalIndex = new Map();
 
     state.blockConcurrencyWhile(async () => {
+
       const stored = await state.storage.get("globalIndex");
+
       if (stored) this.globalIndex = new Map(stored);
+
     });
+
   }
 
   async fetch(request) {
+
     const url = new URL(request.url);
 
     if (url.pathname === "/ingest") {
+
       const data = await request.json();
 
       if (data.type === MISSION_EVENTS.STATUS_CHANGED) {
+
         this.globalIndex.set(data.missionId, {
           status: data.payload.nextState,
           version: data.version,
@@ -328,17 +412,23 @@ export class FleetState {
           "globalIndex",
           Array.from(this.globalIndex.entries())
         );
+
       }
 
       return new Response("OK");
+
     }
 
     if (url.pathname === "/dashboard") {
+
       return json(Array.from(this.globalIndex.entries()));
+
     }
 
     return new Response("Not found", { status: 404 });
+
   }
+
 }
 
 /* =========================================================
