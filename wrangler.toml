@@ -1,6 +1,10 @@
-name = "mission-control-worker"
+name = "mission-control"
 main = "src/index.js"
-compatibility_date = "2026-02-27"
+compatibility_date = "2026-03-01"
+
+# =========================================================
+# DURABLE OBJECTS
+# =========================================================
 
 [[durable_objects.bindings]]
 name = "MISSION_STATE"
@@ -10,14 +14,22 @@ class_name = "MissionState"
 name = "FLEET_STATE"
 class_name = "FleetState"
 
+# =========================================================
+# D1 DATABASE
+# =========================================================
+
+[[d1_databases]]
+binding = "schema"
+database_name = "mission-control-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+# =========================================================
+# DURABLE OBJECT MIGRATIONS
+# =========================================================
+
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["MissionState", "FleetState"]
-
-[[services]]
-binding = "mission-control-api"
-service = "mission-control-api"
-
-[[services]]
-binding = "mission-comms"
-service = "mission-comms"
+new_classes = [
+  "MissionState",
+  "FleetState"
+]
