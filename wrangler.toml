@@ -21,7 +21,7 @@ class_name = "FleetState"
 [[d1_databases]]
 binding = "schema"
 database_name = "mission-control-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "5e5798c4-17bd-4f8b-88d8-04ae0905c861"
 
 # =========================================================
 # DURABLE OBJECT MIGRATIONS
