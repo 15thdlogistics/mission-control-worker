@@ -2,6 +2,7 @@ name = "mission-control-worker"
 main = "src/index.js"
 compatibility_date = "2026-05-19"
 
+
 # Required compatibility flags for modern fetch and WebSocket behaviors
 compatibility_flags = [ "nodejs_compat" ]
 
@@ -26,14 +27,17 @@ new_classes = ["MissionState", "FleetState"]
 # =========================================================================
 # 2. SERVICE BINDINGS (SISTER WORKERS)
 # =========================================================================
-# Map the internal edge fetches for downstream async operations
-[[services]]
-binding = "icc-pivot-engine"
-service = "icc-pivot-engine-prod"
-
-[[services]]
-binding = "mission-comms"
-service = "mission-comms-prod"
+# NOTE: Cloudflare strictly validates that bound service workers exist in your 
+# dashboard before allowing deployment. Since these are not yet deployed, 
+# they are commented out below. Re-enable them once the sister workers exist!
+#
+# [[services]]
+# binding = "icc-pivot-engine"
+# service = "icc-pivot-engine-prod"
+#
+# [[services]]
+# binding = "mission-comms"
+# service = "mission-comms-prod"
 
 # =========================================================================
 # 3. ENVIRONMENT VARIABLES & SECRETS
@@ -41,14 +45,3 @@ service = "mission-comms-prod"
 [vars]
 # Your Supabase Project API URL (publicly safe)
 SUPABASE_URL = "https://mhplukffgcxiorpfunyy.supabase.co"
-
-# --- SECRETS WARNING ---
-# Do NOT define secrets directly in this plain-text wrangler.toml.
-# Instead, upload them securely using these CLI commands in your terminal:
-# 
-# $ npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-# (Input the key matching your project)
-# 
-# $ npx wrangler secret put SUPABASE_JWT_SECRET
-# (Input your JWT secret - found in Supabase Settings -> API -> JWT Secret)
-# =========================================================================
