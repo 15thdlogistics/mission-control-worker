@@ -1,35 +1,54 @@
-name = "mission-control"
-main = "src/index.js"
-compatibility_date = "2026-03-01"
+name = "mission-control-worker"
+main = "mission_control_worker.js"
+compatibility_date = "2026-05-19"
 
-# =========================================================
-# DURABLE OBJECTS
-# =========================================================
+# Required compatibility flags for modern fetch and WebSocket behaviors
+compatibility_flags = [ "nodejs_compat" ]
 
+# =========================================================================
+# 1. DURABLE OBJECTS BINDINGS
+# =========================================================================
+# This registers your MissionState class as a Durable Object within this worker
 [[durable_objects.bindings]]
 name = "MISSION_STATE"
 class_name = "MissionState"
 
+# If you also bundle FleetState in the same worker, define it here:
 [[durable_objects.bindings]]
 name = "FLEET_STATE"
 class_name = "FleetState"
 
-# =========================================================
-# D1 DATABASE
-# =========================================================
-
-[[d1_databases]]
-binding = "schema"
-database_name = "mission-control-db"
-database_id = "5e5798c4-17bd-4f8b-88d8-04ae0905c861"
-
-# =========================================================
-# DURABLE OBJECT MIGRATIONS
-# =========================================================
-
+# Required local storage migrations to initialize DO classes
 [[migrations]]
 tag = "v1"
-new_classes = [
-  "MissionState",
-  "FleetState"
-]
+new_classes = ["MissionState", "FleetState"]
+
+# =========================================================================
+# 2. SERVICE BINDINGS (SISTER WORKERS)
+# =========================================================================
+# Map the internal edge fetches for downstream async operations
+[[services]]
+binding = "icc-pivot-engine"
+service = "icc-pivot-engine-prod"
+
+[[services]]
+binding = "mission-comms"
+service = "mission-comms-prod"
+
+# =========================================================================
+# 3. ENVIRONMENT VARIABLES & SECRETS
+# =========================================================================
+[vars]
+# Your Supabase Project API URL (publicly safe)
+SUPABASE_URL = "https://mhplukffgcxiorpfunyy.supabase.co"
+
+# --- SECRETS WARNING ---
+# Do NOT define secrets directly in this plain-text wrangler.toml.
+# Instead, upload them securely using these CLI commands in your terminal:
+# 
+# $ npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+# (Input the key matching your project)
+# 
+# $ npx wrangler secret put SUPABASE_JWT_SECRET
+# (Input your JWT secret - found in Supabase Settings -> API -> JWT Secret)
+# =========================================================================
